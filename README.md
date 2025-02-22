@@ -1,0 +1,1 @@
+simple endpoint in main.py using fastapi
