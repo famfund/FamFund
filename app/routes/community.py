@@ -1,10 +1,29 @@
-# app/routes/community.py
-# Inside community.py
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
+import app.firebase as fb  # Import Firebase module
+from firebase_admin import auth
+from typing import List
 
 
-from flask import Blueprint, request, jsonify
-from flask_jwt_extended import jwt_required, get_jwt_identity
-from app.models import db, Community, CommunityMembership  # adjust import path as needed
+# Mock data: Dictionary where keys are community IDs, and values are lists of members
+communities = {
+    1: ["Alice", "Bob", "Charlie"],
+    2: ["David", "Eve", "Frank"],
+    3: ["Grace", "Hank", "Ivy"]
+}
+
+@router.get("/api/community/members/{community_id}", response_model=List[str])
+def get_community_members(community_id: int):
+    """
+    Retrieve all members of a given community by community_id.
+    If the community does not exist, return an empty list.
+    """
+    return communities.get(community_id, [])
+
+class Community(BaseModel):
+    community_name: str
+    description: str
+    platform_id: str
 
 community_bp = Blueprint("community_bp", __name__)
 
