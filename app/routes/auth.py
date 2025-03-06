@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+import APIRouter, HTTPException
 from pydantic import BaseModel
 import app.firebase as fb  # Import the firebase module, not just db
 
