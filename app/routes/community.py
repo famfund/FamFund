@@ -46,6 +46,26 @@ def create_community(request: Community, authorization: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.get("/{community_id}")
+def get_community_details(community_id: str):
+    """
+    Retrieves details of a specific community.
+    """
+    if fb.db is None:
+        fb.initialize_firebase()
+
+    try:
+        community_ref = fb.db.collection("communities").document(community_id)
+        community_doc = community_ref.get()
+
+        if not community_doc.exists:
+            raise HTTPException(status_code=404, detail="Community not found.")
+
+        return community_doc.to_dict()
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.post("/{community_id}/join")
 async def join_community(community_id: str, authorization: str):
     """Allows users to join a community, enforcing the 100-member limit and sending live updates."""
@@ -58,7 +78,7 @@ async def join_community(community_id: str, authorization: str):
         community_ref = fb.db.collection("communities").document(community_id)
         community_doc = community_ref.get()
 
-        if not community_doc.exists:
+        if not community_doc.exists():
             raise HTTPException(status_code=404, detail="Community not found.")
 
         community_data = community_doc.to_dict()
