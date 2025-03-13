@@ -1,20 +1,35 @@
-from fastapi import FastAPI
-from app.routes import auth, community, loans, funds, repayments, admin, notifications, chat, search, transactions
+from fastapi import FastAPI, WebSocket
+from app.firebase import initialize_firebase  # Initialize Firebase here
+from app.routes import auth, community, loans  # Import routers including loans
 
+# Initialize Firebase
+initialize_firebase()
+
+# Initialize FastAPI App
 app = FastAPI()
 
-# Register routers
+# Register Routers
 app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
 app.include_router(community.router, prefix="/api/community", tags=["Community"])
 app.include_router(loans.router, prefix="/api/community-loans", tags=["Community Loans"])
-app.include_router(funds.router, prefix="/api/funds", tags=["Funds"])
-app.include_router(repayments.router, prefix="/api/repayment", tags=["Repayment"])
-app.include_router(admin.router, prefix="/api/community/moderator", tags=["Admin"])
-app.include_router(notifications.router, prefix="/api/notifications", tags=["Notifications"])
-app.include_router(chat.router, prefix="/api/chat", tags=["Chat"])
-app.include_router(search.router, prefix="/api/search", tags=["Search"])
-app.include_router(transactions.router, prefix="/api/transactions", tags=["Transactions"])
 
+# Root Endpoint
 @app.get("/")
 def root():
-    return {"message": "FamFund API is running!"}
+    return {"message": "FamFund API is running with WebSocket support!"}
+
+
+# WebSocket Endpoint for Real-Time Community Updates
+@app.websocket("/ws/community/{community_id}")
+async def community_updates(websocket: WebSocket, community_id: str):
+    await websocket.accept()
+    await websocket.send_text(f"Connected to community {community_id} updates!")
+
+    try:
+        while True:
+            data = await websocket.receive_text()
+            await websocket.send_text(f"Received in community {community_id}: {data}")
+
+    except Exception as e:
+        print(f"WebSocket closed: {e}")
+        await websocket.close()
