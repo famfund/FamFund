@@ -1,10 +1,12 @@
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
 import app.firebase as fb  
 
 router = APIRouter()
+
+# Data Models
 
 class LoanRequest(BaseModel):
     community_id: str  
@@ -12,96 +14,113 @@ class LoanRequest(BaseModel):
     purpose: Optional[str] = None
 
 class LoanVoteRequest(BaseModel):
-    vote_type: str  
+    vote_type: str  # Example: 'approve' or 'reject'
+
+# Helper functions
 
 def get_current_user_id():
     """
-    In real code, you'd decode a token or reference
-    your existing auth logic. For now, we just return
-    a fake user ID.
+    Mock user ID retrieval for development purposes.
+    Replace this with real authentication logic.
     """
-    return "fakeUserId"
+    return "mockUserId"
+
+# end points
 
 @router.post("/", status_code=201)
-def create_loan(loan_data: LoanRequest, user_id: str = Depends(get_current_user_id)):
+def submit_loan_request(loan: LoanRequest, user_id: str = Depends(get_current_user_id)):
     """
-    Submit a loan request to a particular community.
-    Only members of that community can request a loan.
+    Submit a loan request to a community.
+    Only members of the community can submit a request.
     """
-    db = fb.db  # Firestore client
+    db = fb.db  
+    community = db.collection("communities").document(loan.community_id).get()
 
-    community_ref = db.collection("communities").document(loan_data.community_id)
-    community_doc = community_ref.get()
-    if not community_doc.exists:
+    if not community.exists:
         raise HTTPException(status_code=404, detail="Community not found.")
 
-    community_data = community_doc.to_dict()
-    members = community_data.get("members", [])
+    if user_id not in community.to_dict().get("members", []):
+        raise HTTPException(status_code=403, detail="User is not a member of this community.")
 
-    if user_id not in members:
-        raise HTTPException(status_code=403, detail="User is not a member of that community.")
-
-
-    loans_collection = db.collection("loans")
-    new_loan_ref = loans_collection.document() 
-    new_loan_data = {
-        "community_id": loan_data.community_id,
+    loan_ref = db.collection("loans").document()
+    loan_ref.set({
+        "loan_id": loan_ref.id,
+        "community_id": loan.community_id,
         "user_id": user_id,
-        "amount": loan_data.amount,
-        "purpose": loan_data.purpose,
+        "amount": loan.amount,
+        "purpose": loan.purpose,
         "status": "PENDING",
         "created_at": datetime.utcnow(),
-
         "votes": []
-    }
-    new_loan_ref.set(new_loan_data)
+    })
 
-    return {
-        "message": "Loan request submitted successfully.",
-        "loan_id": new_loan_ref.id,
-        "status": "PENDING"
-    }
+    return {"message": "Loan request submitted successfully.", "loan_id": loan_ref.id, "status": "PENDING"}
+
 
 @router.post("/{loan_id}/vote", status_code=200)
-def vote_on_loan(loan_id: str, vote_data: LoanVoteRequest, user_id: str = Depends(get_current_user_id)):
+def cast_vote_on_loan(loan_id: str, vote: LoanVoteRequest, user_id: str = Depends(get_current_user_id)):
     """
-    Cast a vote on an existing loan. Only members
-    of that community can vote.
+    Cast a vote on a loan request. Only community members can vote.
     """
     db = fb.db
-    loan_ref = db.collection("loans").document(loan_id)
-    loan_doc = loan_ref.get()
-    if not loan_doc.exists:
+    loan = db.collection("loans").document(loan_id).get()
+
+    if not loan.exists:
         raise HTTPException(status_code=404, detail="Loan not found.")
 
-    loan_data = loan_doc.to_dict()
+    loan_data = loan.to_dict()
+    community = db.collection("communities").document(loan_data["community_id"]).get()
 
-    community_ref = db.collection("communities").document(loan_data["community_id"])
-    community_doc = community_ref.get()
-    if not community_doc.exists:
-        raise HTTPException(status_code=404, detail="Community not found.")
-    
-    community_data = community_doc.to_dict()
-    members = community_data.get("members", [])
-
-    if user_id not in members:
-        raise HTTPException(
-            status_code=403,
-            detail="User is not a member of this community."
-        )
+    if not community.exists or user_id not in community.to_dict().get("members", []):
+        raise HTTPException(status_code=403, detail="User is not a member of this community.")
 
     votes = loan_data.get("votes", [])
-
     existing_vote = next((v for v in votes if v["user_id"] == user_id), None)
-    if existing_vote:
-        existing_vote["vote_type"] = vote_data.vote_type
-    else:
-        votes.append({"user_id": user_id, "vote_type": vote_data.vote_type})
 
-    updated_data = {
+    if existing_vote:
+        existing_vote["vote_type"] = vote.vote_type
+    else:
+        votes.append({"user_id": user_id, "vote_type": vote.vote_type})
+
+    db.collection("loans").document(loan_id).update({
         "votes": votes,
         "updated_at": datetime.utcnow()
-    }
-    loan_ref.update(updated_data)
+    })
 
-    return {"message": f"Vote '{vote_data.vote_type}' recorded for loan {loan_id}."}
+    return {"message": f"Vote '{vote.vote_type}' recorded for loan {loan_id}."}
+
+
+@router.get("/{loan_id}", status_code=200)
+def get_loan_details(loan_id: str):
+    """
+    Retrieve the details of a specific loan request by ID.
+    """
+    db = fb.db
+    loan = db.collection("loans").document(loan_id).get()
+
+    if not loan.exists:
+        raise HTTPException(status_code=404, detail="Loan not found.")
+
+    return loan.to_dict()
+
+
+@router.get("/user/{user_id}", response_model=List[dict])
+def get_loans_by_user(user_id: str):
+    """
+    Retrieve all loan requests made by a specific user.
+    """
+    db = fb.db
+    loan_docs = db.collection("loans").where("user_id", "==", user_id).stream()
+
+    loans = [
+        {
+            "loan_id": loan.id,
+            **loan.to_dict()
+        }
+        for loan in loan_docs
+    ]
+
+    if not loans:
+        raise HTTPException(status_code=404, detail="No loan requests found for this user.")
+
+    return loans
