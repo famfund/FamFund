@@ -1,5 +1,6 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Header
 from pydantic import BaseModel
+from firebase_admin import auth
 import app.firebase as fb
 
 router = APIRouter()
@@ -9,14 +10,34 @@ class LoginRequest(BaseModel):
     user_id: str
     token: str
 
+def verify_token(token: str):
+    """
+    Verifies the provided Firebase authentication token.
+    """
+    try:
+        verified_token = auth.verify_id_token(token)
+        return verified_token.get("uid")
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid or expired authentication token")
+
 @router.post("/login")
 def login(request: LoginRequest):
+    """
+    Handles user login after verifying their token and ID.
+    """
     if fb.db is None:
         fb.initialize_firebase()
+
+    # Verify token and match user ID
+    verified_user_id = verify_token(request.token)
+    if verified_user_id != request.user_id:
+        raise HTTPException(status_code=403, detail="Token does not match user ID.")
+
     try:
         user_doc = fb.db.collection("users").document(request.user_id).get()
         if not user_doc.exists:
             raise HTTPException(status_code=404, detail="User not found")
+
         user_data = user_doc.to_dict()
         return {
             "message": "Login successful",
@@ -33,13 +54,23 @@ def login(request: LoginRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/me")
-def get_logged_in_user(user_id: str):
+def get_logged_in_user(user_id: str, authorization: str = Header(None)):
+    """
+    Retrieves details for the authenticated user.
+    """
     if fb.db is None:
         fb.initialize_firebase()
+
+    # Verify the authorization token
+    verified_user_id = verify_token(authorization)
+    if verified_user_id != user_id:
+        raise HTTPException(status_code=403, detail="Token does not match user ID.")
+
     try:
         user_doc = fb.db.collection("users").document(user_id).get()
         if not user_doc.exists:
             raise HTTPException(status_code=404, detail="User not found")
+
         user_data = user_doc.to_dict()
         return {
             "user_id": user_id,
@@ -56,4 +87,7 @@ def get_logged_in_user(user_id: str):
 
 @router.post("/logout")
 def logout():
+    """
+    Handles user logout.
+    """
     return {"message": "Logout successful"}
