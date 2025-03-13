@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-import app.firebase as fb  # Import the firebase module, not just db
+import app.firebase as fb
 
 router = APIRouter()
 
@@ -11,7 +11,6 @@ class LoginRequest(BaseModel):
 
 @router.post("/login")
 def login(request: LoginRequest):
-    # Ensure that Firebase is initialized (if somehow not yet done)
     if fb.db is None:
         fb.initialize_firebase()
     try:
